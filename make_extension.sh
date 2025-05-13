@@ -44,3 +44,6 @@ cp src/logos/* $TEMP_DIR
 rm -f *.zip
 zip -r $new_version_package_name $TEMP_DIR
 echo "Chrome extension created: $new_version_package_name"
+
+echo "Creating Firefox extension..."
+bash make_ff_extension.sh

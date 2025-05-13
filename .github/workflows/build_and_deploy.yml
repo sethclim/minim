@@ -1,18 +1,18 @@
-name: Build and Release
+name: Build, Release, and Deploy
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
+  build_release_deploy:
     runs-on: ubuntu-latest
 
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
 
     - name: Setup Node.js
-      uses: actions/setup-node@v2
+      uses: actions/setup-node@v3
       with:
         node-version: 14
 
@@ -20,21 +20,24 @@ jobs:
       run: yarn install
 
     - name: Build extension
-      run: yarn build:ext
+      run: bash make_extension.sh
 
     - name: Get version from version.json
       id: version
       run: |
         VERSION=$(jq -r '.version' src/version.json)
         echo "VERSION=$VERSION" >> $GITHUB_ENV
-        echo "::set-output name=version::$VERSION"
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-    - name: Find zip file
-      id: findzip
+    - name: Find zip and xpi files
+      id: findfiles
       run: |
         ZIP_FILE=$(ls *.zip | head -n 1)
+        XPI_FILE=$(ls *.xpi | head -n 1)
         echo "ZIP_FILE=$ZIP_FILE" >> $GITHUB_ENV
-        echo "::set-output name=zip_file::$ZIP_FILE"
+        echo "zip_file=$ZIP_FILE" >> $GITHUB_OUTPUT
+        echo "XPI_FILE=$XPI_FILE" >> $GITHUB_ENV
+        echo "xpi_file=$XPI_FILE" >> $GITHUB_OUTPUT
 
     - name: Create GitHub release
       id: create_release
@@ -45,20 +48,52 @@ jobs:
         tag_name: v${{ steps.version.outputs.version }}
         release_name: Release v${{ steps.version.outputs.version }}
 
-    - name: Upload release asset
+    - name: Upload zip release asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./${{ steps.findzip.outputs.zip_file }}
-        asset_name: ${{ steps.findzip.outputs.zip_file }}
+        asset_path: ./${{ steps.findfiles.outputs.zip_file }}
+        asset_name: ${{ steps.findfiles.outputs.zip_file }}
         asset_content_type: application/zip
 
-    - name: Commit changes
+    - name: Upload xpi release asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./${{ steps.findfiles.outputs.xpi_file }}
+        asset_name: ${{ steps.findfiles.outputs.xpi_file }}
+        asset_content_type: application/x-xpinstall
+
+    - name: Deploy dist to GitHub Pages
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add src/version.json ${{ steps.findzip.outputs.zip_file }}
-        git commit -m "Add new release (v${VERSION}) and update ${ZIP_FILE}" || true
-        git push origin main
+        git config --global user.email "action@github.com"
+        git config --global user.name "GitHub Action"
+
+        # Fetch gh-pages branch if it exists
+        git fetch origin gh-pages
+
+        # Create a new orphan branch based on gh-pages or start clean
+        git worktree add gh-pages-deploy
+        cd gh-pages-deploy
+        git checkout --orphan gh-pages
+
+        # Clean all files
+        git rm -rf .
+
+        # Copy dist contents into this folder
+        cp -r ../dist/* .
+
+        echo "minim.tulv.in" > CNAME
+
+        # Commit and push
+        git add .
+        git commit -m "Deploy GitHub Pages"
+        git push --force origin gh-pages
+
+        # Clean up
+        cd ..
+        git worktree remove gh-pages-deploy
